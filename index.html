@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Smart EV Charge Finder - Fixed</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        :root { --primary-green: #10B981; --dark-bg: #111827; --card-bg: #1F2937; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--dark-bg); color: #E5E7EB; min-height:100vh;}
+        .custom-scroll::-webkit-scrollbar{width:6px}
+        .custom-scroll::-webkit-scrollbar-thumb{background:rgba(100,116,139,0.5);border-radius:3px}
+        .custom-scroll::-webkit-scrollbar-thumb:hover{background:var(--primary-green)}
+        .spinner{border:4px solid rgba(255,255,255,0.1);border-top:4px solid var(--primary-green);border-radius:50%;width:20px;height:20px;animation:spin 1s linear infinite}
+        @keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+        #mapid{height:100%;width:100%;border-radius:0.75rem}
+        .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--card-bg)!important;color:#E5E7EB!important;border-radius:0.5rem!important;box-shadow:0 3px 10px rgba(0,0,0,0.5)}
+        .tab-active{border-color:var(--primary-green);color:white;background-color:#374151}
+        .leaflet-marker-icon.custom-marker{background-color:#3B82F6;border-radius:50%;border:4px solid white;box-shadow:0 0 0 4px rgba(59,130,246,0.5);width:20px!important;height:20px!important;margin-top:-10px!important;margin-left:-10px!important;cursor:pointer}
+        .leaflet-marker-icon.custom-marker.highlight{background-color:var(--primary-green);box-shadow:0 0 0 6px rgba(16,185,129,0.8);width:24px!important;height:24px!important;margin-top:-12px!important;margin-left:-12px!important;transition:all 0.3s ease}
+        .nearest-marker{background-color:#F59E0B!important;box-shadow:0 0 0 8px rgba(245,158,11,0.8)!important}
+        .rating-star{color:#FCD34D}
+        .user-rating-star{cursor:pointer;transition:color 0.2s}
+        .leaflet-routing-container{display:none!important}
+        /* Custom status text for real-time station */
+        .realtime-status-indicator {
+            animation: pulse-border 1.5s infinite;
+        }
+        @keyframes pulse-border {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 antialiased flex flex-col lg:flex-row h-screen overflow-hidden">
+<main class="flex-grow flex flex-col lg:flex-row overflow-hidden">
+    <div id="sidebar" class="lg:w-1/3 xl:w-1/4 bg-gray-800 p-6 shadow-2xl flex flex-col h-full overflow-hidden">
+        <h1 class="text-3xl font-extrabold text-white mb-4 flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-emerald-500 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M7 2a1 1 0 00-1 1v5H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v5H9V3a1 1 0 00-1-1H7z" />
+                <path d="M9 12l2-3v2h2l-2 3v-2H9z" />
+            </svg>
+            EV Charge Finder
+        </h1>
+        <div id="nav-tabs" class="flex mb-6 border-b border-gray-700 flex-shrink-0">
+            <button id="tab-finder" onclick="showPage('finder')" class="tab-button flex-1 py-2 text-sm font-semibold text-gray-400 border-b-2 border-transparent hover:border-emerald-500 transition duration-150 tab-active"><i class="fas fa-map-marked-alt mr-1"></i> Map Finder</button>
+            <button id="tab-suggest" onclick="showPage('suggest')" class="tab-button flex-1 py-2 text-sm font-semibold text-gray-400 border-b-2 border-transparent hover:border-emerald-500 transition duration-150"><i class="fas fa-car-battery mr-1"></i> Smart Suggest</button>
+            <button id="tab-route" onclick="showPage('route')" class="tab-button flex-1 py-2 text-sm font-semibold text-gray-400 border-b-2 border-transparent hover:border-emerald-500 transition duration-150"><i class="fas fa-route mr-1"></i> Route Planner</button>
+        </div>
+
+        <div id="page-finder" class="page-content flex flex-col flex-grow overflow-hidden">
+            <div class="mb-4 space-y-4 flex-shrink-0">
+                <input type="text" id="searchInput" oninput="filterStations()" placeholder="Search by City, Operator, or Address..." class="w-full p-3 rounded-xl bg-gray-700 border border-gray-600 focus:ring-emerald-400 focus:border-emerald-400 text-sm text-gray-200">
+                <div class="grid grid-cols-2 gap-3 text-sm">
+                    <select id="cityFilter" onchange="filterStations()" class="p-3 rounded-xl bg-gray-700 border border-gray-600 focus:ring-emerald-400 focus:border-emerald-400 text-gray-200">
+                        <option value="">All Cities</option>
+                        <option value="New Delhi">New Delhi</option>
+                        <option value="Mumbai">Mumbai</option>
+                        <option value="Bengaluru">Bengaluru</option>
+                        <option value="Chennai">Chennai</option>
+                        <option value="Hyderabad">Hyderabad</option>
+                        <option value="Fridabad">Faridabad</option>
+                    </select>
+                    <select id="connectorFilter" onchange="filterStations()" class="p-3 rounded-xl bg-gray-700 border border-gray-600 focus:ring-emerald-400 focus:border-emerald-400 text-gray-200">
+                        <option value="">All Connectors</option>
+                        <option value="Type 2">Type 2 AC</option>
+                        <option value="CCS2">CCS2 DC</option>
+                        <option value="CHAdeMO">CHAdeMO DC</option>
+                    </select>
+                </div>
+            </div>
+            <h2 class="text-lg font-bold text-white mb-3 flex justify-between items-center flex-shrink-0">
+                <span id="stationCount">0</span> Stations Found
+                <button onclick="clearFilters()" class="text-xs text-red-400 hover:text-red-300 font-medium p-1 rounded-lg transition duration-150">Clear Filters</button>
+            </h2>
+            <div id="stationList" class="space-y-3 custom-scroll flex-grow overflow-y-auto pr-2"></div>
+        </div>
+
+        <div id="page-suggest" class="page-content flex flex-col flex-grow overflow-hidden hidden">
+            <h2 class="text-2xl font-bold text-emerald-400 mb-4">EV Charging Guide</h2>
+            <div class="space-y-4 flex-shrink-0">
+                <label for="evModelSelect" class="block text-sm font-medium text-gray-300">Select Your EV Model:</label>
+                <select id="evModelSelect" onchange="updateSmartSuggest()" class="w-full p-3 rounded-xl bg-gray-700 border border-gray-600 focus:ring-emerald-400 focus:border-emerald-400 text-sm text-gray-200">
+                    <option value="none">-- Select Vehicle --</option>
+                </select>
+            </div>
+            <div id="suggestionOutput" class="mt-6 flex-grow custom-scroll overflow-y-auto pr-2">
+                <p class="text-gray-400 text-sm">Select an EV model to see compatible ports...</p>
+            </div>
+        </div>
+
+        <div id="page-route" class="page-content flex flex-col flex-grow overflow-hidden hidden">
+            <h2 class="text-2xl font-bold text-emerald-400 mb-4">Find Nearest Available</h2>
+            <div class="mb-4">
+                <button id="findNearestBtn" onclick="findNearestAvailableStation()" class="w-full p-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition duration-200 flex items-center justify-center disabled:opacity-50"><i class="fas fa-location-arrow mr-2"></i> Find Nearest Available Station</button>
+            </div>
+            <div id="routeOutput" class="mt-4 flex-grow custom-scroll overflow-y-auto p-3 bg-gray-700 rounded-xl space-y-3">
+                <p class="text-gray-400 text-sm">Click the button above to use your current location...</p>
+            </div>
+        </div>
+
+        <div id="page-detail" class="page-content flex flex-col flex-grow overflow-hidden hidden">
+            <button onclick="showPage('finder')" class="text-sm font-semibold text-emerald-400 mb-4 flex items-center hover:text-emerald-300 w-fit p-1 -ml-1"><i class="fas fa-arrow-left mr-2"></i> Back to Map</button>
+            <div id="stationDetailContent" class="flex-grow custom-scroll overflow-y-auto pr-2"></div>
+        </div>
+    </div>
+
+    <div class="lg:w-2/3 xl:w-3/4 flex flex-col">
+        <div class="relative flex-grow bg-gray-900 border-b border-gray-700 h-1/2 lg:h-3/5 xl:h-2/3 p-4">
+            <div id="mapid" class="rounded-xl shadow-xl"></div>
+            <div class="absolute bottom-8 right-8 bg-gray-800 text-xs p-2 rounded-lg text-gray-400 shadow-xl z-20">Map Data © OpenStreetMap contributors</div>
+        </div>
+
+        <div class="p-6 bg-gray-800 lg:h-2/5 xl:h-1/3 shadow-inner flex flex-col flex-shrink-0">
+            <h2 class="text-xl font-bold text-emerald-400 mb-3 flex items-center"><i class="fas fa-brain mr-2"></i> EV Info Assistant</h2>
+            <div id="infoOutput" class="custom-scroll p-4 mb-4 bg-gray-700 rounded-xl text-sm h-24 lg:h-32 overflow-y-auto">Ask me anything...</div>
+            <div class="flex flex-shrink-0">
+                <input type="text" id="infoInput" placeholder="Ask a question..." class="flex-grow p-3 rounded-l-xl bg-gray-900 border border-gray-700 focus:ring-emerald-400 focus:border-emerald-400 text-sm text-gray-200">
+                <button id="infoSubmit" onclick="submitInfoQuery()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 px-6 rounded-r-xl transition duration-200 disabled:opacity-50 flex items-center justify-center"><span id="submitText">Search</span><div id="loadingSpinner" class="hidden spinner"></div></button>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- Firebase Modular imports -->
+<script type="module">
+    // ---------------------------------------------------------------------------------------------------
+    // --- FIREBASE REALTIME INTEGRATION START ---
+    // ---------------------------------------------------------------------------------------------------
+    // Import the functions you need from the SDKs you need
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+    import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-database.js";
+
+    // Your web app's Firebase configuration (unchanged from your snippet)
+    const firebaseConfig = {
+        apiKey: "AIzaSyDUofqIy2OKaMZft2GOb6LWYjejqFuub4s",
+        authDomain: "ev-charging-ee60f.firebaseapp.com",
+        databaseURL: "https://ev-charging-ee60f-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "ev-charging-ee60f",
+        storageBucket: "ev-charging-ee60f.firebasestorage.app",
+        messagingSenderId: "972214693813",
+        appId: "1:972214693813:web:537689798840f5f75db3fc",
+        measurementId: "G-0QXQW6P0C9"
+    };
+
+    // Initialize Firebase and get RTDB instance
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // Get a reference to the specific station data path: stations/1/ports
+    const station1PortsRef = ref(db, 'stations/1/ports');
+
+    // 1. Find the Nexus station (ID 1) in the local data
+    const nexusStation = window.stationsData.find(s => s.id === 1);
+    
+    // 2. Create a map of port IDs to their local port objects for quick lookup
+    const localPortMap = {};
+    if (nexusStation) {
+        nexusStation.ports.forEach(p => {
+            localPortMap[p.id] = p;
+        });
+    }
+
+    // Function to listen for real-time changes
+    function listenForPortStatus() {
+        if (!nexusStation) {
+            console.error("Nexus Station (ID 1) not found in local data. Cannot set up listener.");
+            return;
+        }
+
+        // Set up the listener on the Firebase database path
+        onValue(station1PortsRef, (snapshot) => {
+            const portsData = snapshot.val();
+            
+            if (portsData) {
+                let statusChanged = false;
+                
+                // Update the local status for each of the three ports (1A, 1B, 1C)
+                ['1A', '1B', '1C'].forEach(portId => {
+                    const newStatus = portsData[portId]; // 'Available' or 'Occupied'
+                    
+                    if (newStatus && localPortMap[portId] && localPortMap[portId].status !== newStatus) {
+                        localPortMap[portId].status = newStatus;
+                        statusChanged = true;
+                        console.log(`Firebase Update: Station 1 Port ${portId} changed to ${newStatus}`);
+                    }
+                });
+
+                // If any status changed, re-render the UI elements that depend on status
+                if (statusChanged) {
+                    // Update the station list and map markers
+                    if (typeof window.filterStations === 'function') {
+                        window.filterStations();
+                    }
+                    
+                    // If the detail page is open for this station, re-render the port details
+                    if (window.currentStationId === nexusStation.id && typeof window.showStationDetail === 'function') {
+                        // Re-render the detail page to update port status buttons
+                        window.showStationDetail(nexusStation.id);
+                    }
+                }
+            } else {
+                console.warn("Firebase returned no data for stations/1/ports.");
+            }
+        }, (error) => {
+            console.error("Firebase Read Failed: " + error.name);
+        });
+    }
+
+    // Export the listener function to the global scope so window.onload can call it
+    window.listenForPortStatus = listenForPortStatus;
+    // ---------------------------------------------------------------------------------------------------
+    // --- FIREBASE REALTIME INTEGRATION END ---
+    // ---------------------------------------------------------------------------------------------------
+</script>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+
+<script>
+    let map, markersLayer;
+    let reviewUnsubscribe = null;
+    const LOCAL_REVIEWS_KEY = 'local_ev_reviews_v1';
+    const LOCAL_BOOKINGS_KEY = 'local_ev_bookings_v1';
+    const LOCAL_BOOKING_USERS_KEY = 'local_ev_booking_users_v1';
+
+    let userLocation = null;
+    let userLocationMarker = null;
+    let routingControl = null;
+    let currentStationId = null;
+    let userTempRating = 0;
+
+    // Booking state
+    let currentBookingStationId = null;
+    let currentBookingPortId = null;
+    let currentBookingOtp = null;
+    let bookingPhase = 'form';
+    let bookingRefreshTimeoutId = null;
+
+    // NOTE: Station 1 (Nexus Fast Charge) port statuses will be overwritten by the Firebase listener
+    window.stationsData = [
+        { id: 1, name: "Nexus Fast Charge", city: "New Delhi", operator: "StatiQ", address: "Connaught Place, Block C", cost: "₹20/unit", lat: 28.6324, lon: 77.2188, ports: [{ id: '1A', type: 'CCS2', power: '60kW', status: 'Available' }, { id: '1B', type: 'CCS2', power: '60kW', status: 'Occupied' }, { id: '1C', type: 'Type 2', power: '22kW', status: 'Available' }], rating: 0.0, reviewCount: 0 },
+        { id: 2, name: "Green Energy Hub", city: "Mumbai", operator: "Tata Power", address: "Bandra Kurla Complex", cost: "₹15/unit", lat: 19.0760, lon: 72.8777, ports: [{ id: '2A', type: 'Type 2', power: '7kW', status: 'Occupied' }, { id: '2B', type: 'Type 2', power: '7kW', status: 'Out of Order' }], rating: 0.0, reviewCount: 0 },
+        { id: 3, name: "Silicon City Charge", city: "Bengaluru", operator: "IOCL", address: "Electronic City Phase 1", cost: "₹22/unit", lat: 12.9716, lon: 77.5946, ports: [{ id: '3A', type: 'CHAdeMO', power: '50kW', status: 'Available' }, { id: '3B', type: 'CCS2', power: '50kW', status: 'Available' }, { id: '3C', type: 'Type 2', power: '11kW', status: 'Available' }, { id: '3D', type: 'Type 2', power: '11kW', status: 'Occupied' }], rating: 0.0, reviewCount: 0 },
+        { id: 4, name: "Coastal EV Spot", city: "Chennai", operator: "StatiQ", address: "OMR, Thoraipakkam", cost: "₹18/unit", lat: 13.0827, lon: 80.2707, ports: [{ id: '4A', type: 'CCS2', power: '25kW', status: 'Out of Order' }, { id: '4B', type: 'CCS2', power: '25kW', status: 'Available' }], rating: 0.0, reviewCount: 0 },
+        { id: 5, name: "Charminar Charging", city: "Hyderabad", operator: "BPCL", address: "Gachibowli Area", cost: "₹16/unit", lat: 17.3850, lon: 78.4867, ports: [{ id: '5A', type: 'Type 2', power: '15kW', status: 'Available' }], rating: 0.0, reviewCount: 0 },
+        { id: 6, name: "Highway Pit Stop", city: "New Delhi", operator: "Tata Power", address: "NH44, Near Murthal", cost: "₹25/unit", lat: 28.7041, lon: 77.1025, ports: [{ id: '6A', type: 'CCS2', power: '120kW', status: 'Available' }, { id: '6B', type: 'CCS2', power: '120kW', status: 'Available' }, { id: '6C', type: 'CHAdeMO', power: '50kW', status: 'Occupied' }], rating: 0.0, reviewCount: 0 },
+        { id: 7, name: "Worli Sea Link Spot", city: "Mumbai", operator: "StatiQ", address: "Worli, Near Shivaji Park", cost: "₹14/unit", lat: 18.9667, lon: 72.8258, ports: [{ id: '7A', type: 'Type 2', power: '10kW', status: 'Available' }, { id: '7B', type: 'Type 2', power: '10kW', status: 'Available' }], rating: 0.0, reviewCount: 0 },
+        { id: 8, name: "Mujesar Metro", city: "Faridabad", operator: "StatiQ", address: "Sector 6, near YMCA", cost: "₹14/unit", lat: 28.3712, lon: 77.3151, ports: [{ id: '8A', type: 'Type 2', power: '10kW', status: 'Available' }, { id: '8B', type: 'Type 2', power: '10kW', status: 'Occupied' }], rating: 0.0, reviewCount: 0 },
+        { id: 9, name: "Airport Lounge Charge", city: "New Delhi", operator: "Tata Power", address: "T3 Departure", cost: "₹21/unit", lat: 28.5666, lon: 77.1009, ports: [{ id: '9A', type: 'CCS2', power: '50kW', status: 'Available' }, { id: '9B', type: 'Type 2', power: '11kW', status: 'Available' }], rating: 0.0, reviewCount: 0 },
+        { id: 10, name: "Nehru Place Quick Charge", city: "New Delhi", operator: "EESL", address: "Nehru Place Market", cost: "₹17/unit", lat: 28.5529, lon: 77.2505, ports: [{ id: '10A', type: 'CHAdeMO', power: '25kW', status: 'Occupied' }], rating: 0.0, reviewCount: 0 },
+    ];
+    window.currentStations = [...window.stationsData];
+
+    const CustomIcon = L.Icon.extend({
+        options: {
+            iconUrl: 'data:image/png;base64,iVBORw0KGgoAAAANASUVORK5CYII=',
+            shadowUrl: 'data:image/png;base64,iVBORw0KGgoAAAANgAASUVORK5CYII=',
+            iconSize: [20,20],
+            iconAnchor: [10,10],
+            popupAnchor: [0,-10],
+            className: 'custom-marker'
+        }
+    });
+    const defaultIcon = new CustomIcon();
+    const highlightIcon = new CustomIcon({ className: 'custom-marker highlight' });
+    const nearestIcon = new CustomIcon({ className: 'custom-marker nearest-marker highlight' });
+
+    function showPage(pageId) {
+        if (reviewUnsubscribe) { reviewUnsubscribe(); reviewUnsubscribe = null; currentStationId = null; }
+        if (routingControl) { map.removeControl(routingControl); routingControl = null; }
+        if (userLocationMarker) { map.removeLayer(userLocationMarker); userLocationMarker = null; }
+
+        document.querySelectorAll('.page-content').forEach(p=>p.classList.add('hidden'));
+        document.getElementById(`page-${pageId}`).classList.remove('hidden');
+        document.querySelectorAll('.tab-button').forEach(btn=>btn.classList.remove('tab-active'));
+        if (pageId !== 'detail') { document.getElementById(`tab-${pageId}`).classList.add('tab-active'); document.getElementById('nav-tabs').classList.remove('hidden'); } else { document.getElementById('nav-tabs').classList.add('hidden'); }
+        if (pageId === 'finder') { setTimeout(()=>{ map.invalidateSize(); filterStations(); },100); }
+    }
+
+    function showStationDetail(id) {
+        const station = window.stationsData.find(s=>s.id===id);
+        if (!station) return;
+        window.currentStationId = id;
+        const availablePorts = station.ports.filter(p=>p.status==='Available').length;
+        const totalPorts = station.ports.length;
+        
+        // Add a "LIVE" indicator if this is the Firebase-connected station (ID 1)
+        const isLive = id === 1;
+        const liveBadge = isLive ? '<span class="ml-2 px-2 py-1 text-xs font-bold text-white bg-emerald-500 rounded-full shadow-lg realtime-status-indicator">LIVE DATA</span>' : '';
+
+        const detailHtml = `
+            <h2 class="text-3xl font-extrabold text-white mb-2 flex items-center">${station.name}${liveBadge}</h2>
+            <div class="flex items-center text-lg mb-4">
+                ${generateRatingHtml(station.rating, station.reviewCount)}
+            </div>
+            <div class="bg-gray-700 p-4 rounded-xl shadow-inner mb-6 space-y-2">
+                <p class="text-sm text-gray-300"><i class="fas fa-map-marker-alt text-emerald-400 w-5"></i> Address: <span class="font-medium">${station.address}, ${station.city}</span></p>
+                <p class="text-sm text-gray-300"><i class="fas fa-charging-station text-emerald-400 w-5"></i> Operator: <span class="font-medium">${station.operator}</span></p>
+                <p class="text-sm text-gray-300"><i class="fas fa-coins text-emerald-400 w-5"></i> Cost: <span class="font-medium">${station.cost}</span></p>
+                <p class="text-sm text-gray-300"><i class="fas fa-plug text-emerald-400 w-5"></i> Ports Available: <span class="font-medium ${availablePorts>0 ? 'text-emerald-400' : 'text-red-400'}">${availablePorts}/${totalPorts}</span></p>
+            </div>
+            <button onclick="getDirectionsToStation(${station.lat}, ${station.lon})" class="w-full p-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition duration-200 mb-6"><i class="fas fa-route mr-2"></i> Get Directions From My Location</button>
+            <h3 class="text-xl font-bold text-emerald-400 mt-6 mb-3 border-b border-gray-700 pb-2">Ports Status</h3>
+            ${generatePortDetailsHtml(station.ports, station.id)}
+            <h3 class="text-xl font-bold text-emerald-400 mt-6 mb-3 border-b border-gray-700 pb-2">Community Reviews</h3>
+            <button onclick="clearAllReviews()" class="text-xs text-red-400 hover:text-red-300 font-medium mb-2">Clear all reviews (demo reset)</button>
+            <div id="review-submission" class="bg-gray-700 p-4 rounded-xl mb-6">
+                <h4 class="text-lg font-semibold text-white mb-3">Write a Review</h4>
+                <div id="user-rating-input" class="flex space-x-1 mb-3">
+                    ${[1,2,3,4,5].map(i=>`<i class="far fa-star text-2xl text-gray-400 user-rating-star" data-rating="${i}" onclick="setRating(event, ${station.id})"></i>`).join('')}
+                    <span id="current-rating-value" class="ml-3 text-white font-bold text-lg">0 / 5</span>
+                </div>
+                <textarea id="review-comment" class="w-full p-3 rounded-lg bg-gray-900 border border-gray-600 focus:ring-emerald-400 focus:border-emerald-400 text-sm text-gray-200" rows="3" placeholder="Share your experience (min 10 chars)"></textarea>
+                <button onclick="handleReviewSubmission(${station.id})" class="mt-3 w-full p-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition duration-200">Submit Review</button>
+                <div id="review-status-message"></div>
+            </div>
+            <div id="review-list"><p class="text-gray-400 text-center py-4">Loading reviews...</p></div>
+        `;
+
+        document.getElementById('stationDetailContent').innerHTML = detailHtml;
+        showPage('detail');
+        highlightStation(id, true);
+        // Load and render local reviews (no Firebase)
+        const reviews = loadReviewsLocal(id);
+        renderReviews(reviews);
+    }
+
+    function initMap() {
+        if (map) map.remove();
+        const indiaCenter = [20.5937, 78.9629];
+        map = L.map('mapid', { maxZoom:18, minZoom:5 }).setView(indiaCenter,5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'Map data © OpenStreetMap contributors' }).addTo(map);
+        markersLayer = L.layerGroup().addTo(map);
+        locateUser();
+    }
+
+    function renderMapMarkers(stations, highlightId=null) {
+        markersLayer.clearLayers();
+        stations.forEach(station => {
+            const availablePorts = station.ports.filter(p=>p.status==='Available').length;
+            const statusColor = availablePorts > 0 ? 'text-emerald-400' : 'text-red-400';
+            
+            const isLive = station.id === 1; // Check if it's the Firebase station
+            const liveIndicator = isLive ? '<span class="text-xs font-semibold text-emerald-400 ml-1">(LIVE)</span>' : '';
+            const popupContent = `
+                <div class="text-sm">
+                    <h4 class="font-bold text-lg ${statusColor} mb-1">${station.name}${liveIndicator}</h4>
+                    <div class="flex items-center mb-2">
+                        ${generateRatingHtml(station.rating, station.reviewCount)}
+                    </div>
+                    <p class="text-xs text-gray-400 mb-3">${station.address}</p>
+                    <button onclick="showStationDetail(${station.id})" class="mt-2 w-full text-xs bg-emerald-700 hover:bg-emerald-600 text-white font-semibold py-2 px-3 rounded-lg transition duration-150">View Details & Reviews</button>
+                </div>
+            `;
+
+            const icon = (station.id===highlightId) ? highlightIcon : defaultIcon;
+            const marker = L.marker([station.lat, station.lon], { icon: icon, title: station.name, stationId: station.id })
+                .bindPopup(popupContent, { closeButton:false, className:'custom-popup-style' })
+                .on('click', ()=>{ highlightStation(station.id, false); });
+            markersLayer.addLayer(marker);
+            station.marker = marker;
+        });
+
+        if (stations.length>0 && highlightId===null) {
+            const bounds = stations.map(s=>[s.lat,s.lon]);
+            map.fitBounds(bounds,{ padding:[50,50], maxZoom:14 });
+        }
+    }
+
+    function highlightStation(id, centerMap=true) {
+        markersLayer.eachLayer(layer => { try { layer.setIcon(defaultIcon); } catch(e){} });
+        const station = window.stationsData.find(s=>s.id===id);
+        if (station && station.marker) {
+            // Apply a special class for the live station marker
+            const icon = station.id === 1 ? new CustomIcon({ className: 'custom-marker highlight realtime-status-indicator' }) : highlightIcon;
+            station.marker.setIcon(icon);
+            station.marker.openPopup();
+            if (centerMap) map.panTo([station.lat, station.lon], { animate:true, duration:0.5 });
+        }
+
+        const listEntry = document.getElementById(`station-${id}`) || document.getElementById(`route-station-${id}`);
+        if (listEntry) {
+            document.querySelectorAll('#stationList > div').forEach(div => div.classList.remove('border-emerald-400','bg-gray-700'));
+            document.querySelectorAll('#routeOutput > div').forEach(div => div.classList.remove('border-emerald-400','bg-gray-600'));
+            // Also add the pulse effect to the list card for the live station
+            document.querySelectorAll('#stationList > div').forEach(div => div.classList.remove('realtime-status-indicator'));
+            document.querySelectorAll('#routeOutput > div').forEach(div => div.classList.remove('realtime-status-indicator'));
+            
+            if (listEntry.parentElement.id === 'stationList') {
+                listEntry.classList.add('border-emerald-400','bg-gray-700');
+            } else {
+                listEntry.classList.add('border-emerald-400','bg-gray-600');
+            }
+            if(id === 1) {
+                listEntry.classList.add('realtime-status-indicator');
+            }
+            listEntry.scrollIntoView({ behavior:'smooth', block:'center' });
+        }
+    }
+
+    function locateUser() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition((position)=>{
+                userLocation = [position.coords.latitude, position.coords.longitude];
+                if (userLocationMarker) map.removeLayer(userLocationMarker);
+                userLocationMarker = L.circleMarker(userLocation,{ color:'#3B82F6', fillColor:'#3B82F6', fillOpacity:0.8, radius:6 }).addTo(map).bindPopup("Your Location");
+            }, (error)=>{ userLocation=[28.57,77.21]; }, { enableHighAccuracy:true, timeout:5000, maximumAge:0 });
+        } else { userLocation=[28.57,77.21]; }
+    }
+
+    function drawRoute(startLat,startLon,endLat,endLon) {
+        if (routingControl) { map.removeControl(routingControl); routingControl = null; }
+        const start = L.latLng(startLat,startLon);
+        const end = L.latLng(endLat,endLon);
+        routingControl = L.Routing.control({
+            waypoints:[start,end],
+            routeWhileDragging:false,
+            router: L.Routing.osrmv1({ serviceUrl:'https://router.project-osrm.org/route/v1' }),
+            lineOptions:{ styles:[{ color:'#3B82F6', weight:6, opacity:0.7 }] },
+            show:false, addWaypoints:false, fitSelectedRoutes:true, language:'en'
+        }).addTo(map);
+    }
+
+    function getDirectionsToStation(lat,lon) {
+        if (!userLocation) { document.getElementById('review-status-message').innerHTML = '<p class="text-red-400 font-semibold mt-2">Cannot get directions: Your location is unknown. Try Route Planner first.</p>'; return; }
+        showPage('finder');
+        drawRoute(userLocation[0], userLocation[1], lat, lon);
+        document.getElementById('infoOutput').innerHTML = `<p class="text-emerald-400 font-semibold"><i class="fas fa-route mr-1"></i> Showing shortest road route from your location to the station on the map!</p>`;
+    }
+
+    function calculateDistance(lat1,lon1,lat2,lon2){ const R=6371; const dLat=(lat2-lat1)*Math.PI/180; const dLon=(lon2-lon1)*Math.PI/180; const a = Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2); const c=2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); return R*c; }
+
+    function findNearestAvailableStation() {
+        const output = document.getElementById('routeOutput');
+        const button = document.getElementById('findNearestBtn');
+        button.disabled = true; button.innerHTML = '<div class="spinner mr-2"></div> Locating you...';
+        if (!userLocation) { setTimeout(findNearestAvailableStation, 500); return; }
+        const userLat=userLocation[0], userLon=userLocation[1];
+        const available = window.stationsData.filter(s=>s.ports.some(p=>p.status==='Available'));
+        if (available.length===0){ output.innerHTML = '<p class="text-yellow-400">Sorry, no available stations found.</p>'; button.disabled=false; button.innerHTML='<i class="fas fa-location-arrow mr-2"></i> Find Nearest Available Station'; return; }
+        available.forEach(st=> st.distance = calculateDistance(userLat,userLon,st.lat,st.lon));
+        available.sort((a,b)=>a.distance-b.distance);
+        output.innerHTML = '';
+        available.forEach(st=>{
+            const availablePorts = st.ports.filter(p=>p.status==='Available').length;
+            const isLive = st.id === 1 ? 'realtime-status-indicator' : '';
+            const listCard = `<div id="route-station-${st.id}" class="bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700 hover:border-emerald-400 transition duration-150 cursor-pointer ${isLive}" onclick="showRouteOnMap(${st.id})">
+                <div class="flex items-center justify-between mb-1"><h3 class="text-lg font-bold text-white">${st.name}</h3><span class="text-sm font-semibold text-emerald-400">${st.distance.toFixed(2)} km</span></div>
+                <p class="text-xs text-gray-400 mb-2">${st.address}</p>
+                <div class="flex justify-between text-sm"><span class="font-medium text-gray-300">${st.operator}</span><span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-700 text-white">${availablePorts} Available</span></div>
+            </div>`;
+            output.innerHTML += listCard;
+        });
+        highlightStation(available[0].id, true);
+        showRouteOnMap(available[0].id);
+        button.disabled=false; button.innerHTML='<i class="fas fa-location-arrow mr-2"></i> Find Nearest Available Station';
+    }
+
+    function showRouteOnMap(stationId) {
+        const station = window.stationsData.find(s=>s.id===stationId);
+        if (!station || !userLocation) return;
+        document.querySelectorAll('#routeOutput > div').forEach(div => div.classList.remove('border-emerald-400','bg-gray-600'));
+        const routeEntry = document.getElementById(`route-station-${stationId}`); 
+        if (routeEntry) routeEntry.classList.add('border-emerald-400','bg-gray-600');
+        drawRoute(userLocation[0], userLocation[1], station.lat, station.lon);
+        highlightStation(stationId, true);
+    }
+
+    function setRating(event, stationId) {
+        const rating = parseInt(event.currentTarget.dataset.rating);
+        window.userTempRating = rating;
+        const starsContainer = document.getElementById('user-rating-input');
+        const ratingDisplay = document.getElementById('current-rating-value');
+        starsContainer.querySelectorAll('.user-rating-star').forEach(star=>{
+            const starRating = parseInt(star.dataset.rating);
+            star.classList.remove('far','fas','text-yellow-400','text-gray-400');
+            if (starRating <= rating) star.classList.add('fas','text-yellow-400'); else star.classList.add('far','text-gray-400');
+        });
+        ratingDisplay.textContent = `${rating} / 5`;
+    }
+
+
+    
+    // ------- Local booking system (no backend) -------
+    function loadAllBookings() {
+        try {
+            return JSON.parse(localStorage.getItem(LOCAL_BOOKINGS_KEY) || '[]');
+        } catch (e) {
+            console.error('Error reading local bookings', e);
+            return [];
+        }
+    }
+
+    function saveAllBookings(bookings) {
+        try {
+            localStorage.setItem(LOCAL_BOOKINGS_KEY, JSON.stringify(bookings));
+        } catch (e) {
+            console.error('Error saving local bookings', e);
+        }
+    }
+
+    function loadBookingUsers() {
+        try {
+            return JSON.parse(localStorage.getItem(LOCAL_BOOKING_USERS_KEY) || '[]');
+        } catch (e) {
+            console.error('Error reading booking users', e);
+            return [];
+        }
+    }
+
+    function saveBookingUsers(users) {
+        try {
+            localStorage.setItem(LOCAL_BOOKING_USERS_KEY, JSON.stringify(users));
+        } catch (e) {
+            console.error('Error saving booking users', e);
+        }
+    }
+
+    function cleanupExpiredBookings() {
+        const now = Date.now();
+        const maxAgeMs = 5 * 60 * 1000; // 5 minutes
+        let bookings = loadAllBookings();
+        const before = bookings.length;
+        bookings = bookings.filter(b => !b.bookedAt || (now - b.bookedAt) <= maxAgeMs);
+        if (bookings.length !== before) {
+            saveAllBookings(bookings);
+        }
+    }
+
+    function hasActiveBooking(stationId, portId) {
+        cleanupExpiredBookings();
+        const bookings = loadAllBookings();
+        return bookings.some(b => b.stationId === stationId && b.portId === portId);
+    }
+
+    function hasUserAlreadyBooked(phone, plate) {
+        const keyPhone = (phone || '').trim();
+        const keyPlate = (plate || '').trim().toUpperCase();
+        if (!keyPhone || !keyPlate) return false;
+        const users = loadBookingUsers();
+        return users.some(u => u.phone === keyPhone && u.plate === keyPlate);
+    }
+
+    function rememberBookingUser(phone, plate) {
+        const keyPhone = (phone || '').trim();
+        const keyPlate = (plate || '').trim().toUpperCase();
+        if (!keyPhone || !keyPlate) return;
+        const users = loadBookingUsers();
+        if (!users.some(u => u.phone === keyPhone && u.plate === keyPlate)) {
+            users.push({ phone: keyPhone, plate: keyPlate });
+            saveBookingUsers(users);
+        }
+    }
+
+    function scheduleBookingExpiryRefresh(stationId) {
+        if (bookingRefreshTimeoutId) {
+            clearTimeout(bookingRefreshTimeoutId);
+            bookingRefreshTimeoutId = null;
+        }
+        bookingRefreshTimeoutId = setTimeout(() => {
+            // After 5 minutes, refresh details so button state updates
+            if (window.currentStationId === stationId && typeof showStationDetail === 'function') {
+                showStationDetail(stationId);
+            }
+        }, 5 * 60 * 1000);
+    }
+
+    function openBookingModal(stationId, portId) {
+        currentBookingStationId = stationId;
+        currentBookingPortId = portId;
+        currentBookingOtp = null;
+        bookingPhase = 'form';
+
+        const station = (window.stationsData || []).find(s => s.id === stationId);
+        const port = station ? station.ports.find(p => p.id === portId) : null;
+
+        const modal = document.getElementById('bookingModal');
+        if (!modal) return;
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+
+        document.getElementById('bookingStationName').textContent = station ? station.name : '';
+        document.getElementById('bookingPortInfo').textContent = port ? `${port.type} (${port.power}) - Port ${port.id}` : '';
+
+        document.getElementById('bookingPhone').value = '';
+        document.getElementById('bookingPlate').value = '';
+        document.getElementById('bookingOtpDisplay').textContent = 'OTP will appear here after you generate it.';
+        document.getElementById('bookingError').textContent = '';
+        const actionBtn = document.getElementById('bookingActionBtn');
+        actionBtn.textContent = 'Generate OTP';
+    }
+
+    function closeBookingModal() {
+        const modal = document.getElementById('bookingModal');
+        if (!modal) return;
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        currentBookingStationId = null;
+        currentBookingPortId = null;
+        currentBookingOtp = null;
+        bookingPhase = 'form';
+    }
+
+    function handleBookingAction() {
+        const phoneInput = document.getElementById('bookingPhone');
+        const plateInput = document.getElementById('bookingPlate');
+        const otpDisplay = document.getElementById('bookingOtpDisplay');
+        const errorBox = document.getElementById('bookingError');
+        const actionBtn = document.getElementById('bookingActionBtn');
+
+        if (!phoneInput || !plateInput || !otpDisplay || !errorBox || !actionBtn) return;
+
+        const phone = phoneInput.value.trim();
+        const plate = plateInput.value.trim().toUpperCase();
+
+        errorBox.textContent = '';
+
+        if (bookingPhase === 'form') {
+            if (phone.length < 8) {
+                errorBox.textContent = 'Please enter a valid mobile number.';
+                return;
+            }
+            if (plate.length < 4) {
+                errorBox.textContent = 'Please enter a valid vehicle number plate.';
+                return;
+            }
+
+            if (hasUserAlreadyBooked(phone, plate)) {
+                errorBox.textContent = 'This vehicle has already used its one-time booking and cannot book again.';
+                return;
+            }
+
+            if (hasActiveBooking(currentBookingStationId, currentBookingPortId)) {
+                errorBox.textContent = 'This port is already booked at the moment. Please try another port or wait a few minutes.';
+                return;
+            }
+
+            // Generate 4-digit OTP and show it
+            const otp = Math.floor(1000 + Math.random() * 9000);
+            currentBookingOtp = otp;
+            otpDisplay.textContent = `Your OTP: ${otp}. Share this with the station operator.`;
+            bookingPhase = 'otp';
+            actionBtn.textContent = 'Done';
+            return;
+        }
+
+        if (bookingPhase === 'otp') {
+            // Confirm booking
+            const bookings = loadAllBookings();
+            const now = Date.now();
+            const stationId = currentBookingStationId;
+            const portId = currentBookingPortId;
+            bookings.push({
+                stationId: stationId,
+                portId: portId,
+                phone: phone,
+                plate: plate,
+                bookedAt: now
+            });
+            saveAllBookings(bookings);
+            rememberBookingUser(phone, plate);
+            scheduleBookingExpiryRefresh(stationId);
+
+            closeBookingModal();
+
+            // Refresh station details to update button state
+            if (typeof showStationDetail === 'function' && stationId != null) {
+                showStationDetail(stationId);
+            } else if (typeof showStationDetail === 'function') {
+                showStationDetail(window.currentStationId);
+            }
+        }
+    }
+    // --------------------------------------------------------------
+
+// ------- LocalStorage-based review system (no Firebase) -------
+    function loadAllReviews() {
+        try {
+            return JSON.parse(localStorage.getItem(LOCAL_REVIEWS_KEY) || '[]');
+        } catch (e) {
+            console.error('Error reading local reviews', e);
+            return [];
+        }
+    }
+
+    function saveAllReviews(reviews) {
+        try {
+            localStorage.setItem(LOCAL_REVIEWS_KEY, JSON.stringify(reviews));
+        } catch (e) {
+            console.error('Error saving local reviews', e);
+        }
+    }
+
+    function loadReviewsLocal(stationId) {
+        const all = loadAllReviews();
+        return all
+            .filter(r => r.stationId === stationId)
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+            .map(r => ({
+                userName: 'Guest User',
+                rating: r.rating,
+                comment: r.comment,
+                date: new Date(r.timestamp || Date.now()).toLocaleDateString()
+            }));
+    }
+
+    function recomputeStationRatingsFromLocal() {
+        const all = loadAllReviews();
+        const totals = {};
+        all.forEach(r => {
+            if (!totals[r.stationId]) totals[r.stationId] = { sum: 0, count: 0 };
+            totals[r.stationId].sum += Number(r.rating) || 0;
+            totals[r.stationId].count += 1;
+        });
+        if (window.stationsData) {
+            window.stationsData.forEach(st => {
+                const t = totals[st.id];
+                if (t && t.count > 0) {
+                    st.reviewCount = t.count;
+                    st.rating = parseFloat((t.sum / t.count).toFixed(1));
+                } else {
+                    st.reviewCount = 0;
+                    st.rating = 0.0;
+                }
+            });
+        }
+    }
+
+    function submitReviewLocal(stationId, rating, comment) {
+        const all = loadAllReviews();
+        all.push({
+            stationId: stationId,
+            rating: rating,
+            comment: comment,
+            timestamp: Date.now()
+        });
+        saveAllReviews(all);
+        // Recompute aggregate ratings
+        recomputeStationRatingsFromLocal();
+        // Re-render current station detail & lists
+        const statusMessage = document.getElementById('review-status-message');
+        if (statusMessage) {
+            statusMessage.innerHTML = '<p class="text-emerald-400 font-semibold mt-2"><i class="fas fa-check-circle mr-1"></i> Review saved locally!</p>';
+        }
+        const reviews = loadReviewsLocal(stationId);
+        renderReviews(reviews);
+        // Refresh station list & map with updated ratings
+        if (typeof filterStations === 'function') {
+            filterStations();
+        }
+    }
+
+    function clearAllReviews() {
+        saveAllReviews([]);
+        recomputeStationRatingsFromLocal();
+        if (typeof filterStations === 'function') {
+            filterStations();
+        }
+        // If we're on a detail page, refresh its reviews view
+        if (window.currentStationId != null) {
+            const reviews = loadReviewsLocal(window.currentStationId);
+            renderReviews(reviews);
+            const statusMessage = document.getElementById('review-status-message');
+            if (statusMessage) {
+                statusMessage.innerHTML = '<p class="text-yellow-400 font-semibold mt-2"><i class="fas fa-trash-alt mr-1"></i> All reviews cleared for demo.</p>';
+            }
+        }
+    }
+    // --------------------------------------------------------------
+    function handleReviewSubmission(stationId) {
+        const comment = document.getElementById('review-comment').value.trim();
+        const statusMessage = document.getElementById('review-status-message');
+        if (window.userTempRating === 0) { statusMessage.innerHTML = '<p class="text-red-400 font-semibold mt-2">Please select a star rating.</p>'; return; }
+        if (comment.length < 10) { statusMessage.innerHTML = '<p class="text-red-400 font-semibold mt-2">Please add a comment (min 10 characters).</p>'; return; }
+        statusMessage.innerHTML = '<p class="text-emerald-400 font-semibold mt-2"><div class="spinner mr-2 inline-block"></div> Saving review...</p>';
+        submitReviewLocal(stationId, window.userTempRating, comment);
+        document.getElementById('review-comment').value = '';
+        setRating({ currentTarget: { dataset: { rating: 0 } } }, stationId);
+        window.userTempRating = 0;
+    }
+
+    function renderReviews(reviews) {
+        const reviewListContainer = document.getElementById('review-list');
+        if (!reviewListContainer) return;
+        if (reviews.length === 0) { reviewListContainer.innerHTML = '<p class="text-gray-400 text-center py-4">Be the first to leave a review!</p>'; return; }
+        let html = '';
+        reviews.forEach(review => {
+            const stars = generateRatingHtml(review.rating, 0).replace('(0 reviews)','');
+            html += `<div class="bg-gray-800 p-4 rounded-xl shadow-lg mb-3 border-l-4 border-emerald-500"><div class="flex justify-between items-center mb-1"><p class="font-bold text-white">${review.userName}</p><p class="text-xs text-gray-400">${review.date}</p></div><div class="mb-2">${stars}</div><p class="text-sm text-gray-300">${review.comment}</p></div>`;
+        });
+        reviewListContainer.innerHTML = html;
+    }
+
+    function getStatusClasses(status) {
+        if (status === 'Available') return 'bg-emerald-600';
+        if (status === 'Occupied') return 'bg-yellow-500';
+        return 'bg-red-600';
+    }
+
+    function generateRatingHtml(rating, reviews) {
+        const r = parseFloat(rating || 0);
+        const fullStars = Math.floor(r);
+        const halfStar = r % 1 >= 0.25 && r % 1 < 0.75;
+        const emptyStars = 5 - fullStars - (halfStar ? 1 : 0);
+        let stars = '';
+        for (let i=0;i<fullStars;i++) stars += '<i class="fas fa-star rating-star"></i>';
+        if (halfStar) stars += '<i class="fas fa-star-half-alt rating-star"></i>';
+        for (let i=0;i<emptyStars;i++) stars += '<i class="far fa-star text-gray-400"></i>';
+        return `<span class="text-lg font-semibold mr-2 text-white">${r.toFixed(1)}</span><span class="text-sm">${stars}</span><span class="text-sm text-gray-400 ml-2">(${reviews} reviews)</span>`;
+    }
+
+    
+    function generatePortDetailsHtml(ports, stationId) {
+        cleanupExpiredBookings();
+        let html = '<div class="mt-2 space-y-2">';
+        ports.forEach(port => {
+            const statusClass = getStatusClasses(port.status);
+            const isLive = stationId === 1 && (port.id === '1A' || port.id === '1B' || port.id === '1C');
+            const livePulse = isLive ? 'realtime-status-indicator' : '';
+
+            // Decide button appearance based on status and booking state
+            let btnLabel = 'Book';
+            let btnClasses = 'ml-3 px-3 py-1.5 text-xs rounded-lg font-semibold ';
+            let btnAttrs = '';
+            if (port.status !== 'Available') {
+                btnLabel = port.status === 'Occupied' ? 'Occupied' : 'Unavailable';
+                btnClasses += 'bg-gray-600 text-gray-300 cursor-not-allowed';
+                btnAttrs = 'disabled';
+            } else if (hasActiveBooking(stationId, port.id)) {
+                btnLabel = 'Booked';
+                btnClasses += 'bg-gray-600 text-gray-300 cursor-not-allowed';
+                btnAttrs = 'disabled';
+            } else {
+                btnClasses += 'bg-emerald-600 hover:bg-emerald-500 text-white';
+                btnAttrs = `onclick="openBookingModal(${stationId}, '${port.id}')"`; 
+            }
+
+            html += `
+                <div class="flex items-center justify-between text-sm p-3 bg-gray-700 rounded-lg ${livePulse}">
+                    <span class="font-semibold">
+                        Port ${port.id}: ${port.type} <span class="text-gray-400">(${port.power})</span>
+                    </span>
+                    <div class="flex items-center space-x-2">
+                        <span class="px-2 py-0.5 rounded-full text-white ${statusClass} font-medium">${port.status}</span>
+                        <button ${btnAttrs} class="${btnClasses}">${btnLabel}</button>
+                    </div>
+                </div>`;
+        });
+        html += '</div>';
+        return html;
+    }
+
+    function renderStationList(stations) {
+        const listContainer = document.getElementById('stationList');
+        const countDisplay = document.getElementById('stationCount');
+        listContainer.innerHTML = ''; countDisplay.textContent = stations.length;
+        if (stations.length === 0) { listContainer.innerHTML = '<p class="text-center text-gray-500 pt-8">No stations match your criteria.</p>'; return; }
+        stations.forEach(station => {
+            const availablePorts = station.ports.filter(p=>p.status==='Available').length;
+            const totalPorts = station.ports.length;
+            const statusClass = availablePorts > 0 ? 'bg-emerald-600' : 'bg-red-600';
+            const isLive = station.id === 1;
+            const liveIndicator = isLive ? '<span class="ml-2 px-1 py-0.5 text-[10px] font-bold text-white bg-emerald-500 rounded realtime-status-indicator">LIVE</span>' : '';
+
+            const card = `<div id="station-${station.id}" class="bg-gray-900 p-4 rounded-xl shadow-lg border border-gray-700 hover:border-emerald-400 transition duration-150 cursor-pointer ${isLive ? 'realtime-status-indicator' : ''}" onclick="highlightStation(${station.id}, true)">
+                <div class="flex items-center justify-between mb-1">
+                    <h3 class="text-lg font-bold text-white flex items-center">${station.name}${liveIndicator}</h3>
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${statusClass} text-white">${availablePorts}/${totalPorts} Available</span>
+                </div>
+                <div class="flex items-center text-sm mb-2">${generateRatingHtml(station.rating, station.reviewCount).replace(/text-(lg|sm) font-semibold mr-2 text-white/,'text-sm font-semibold mr-2 text-white')}</div>
+                <p class="text-xs text-gray-400 mb-2 truncate">${station.address}, ${station.city}</p>
+                <div class="flex justify-between text-sm"><span class="font-medium text-emerald-400">${station.operator}</span><span class="text-gray-300">${station.cost}</span></div>
+            </div>`;
+            listContainer.innerHTML += card;
+        });
+    }
+
+    function filterStations() {
+        const searchInput = document.getElementById('searchInput').value.toLowerCase();
+        const cityFilter = document.getElementById('cityFilter').value;
+        const connectorFilter = document.getElementById('connectorFilter').value;
+        window.currentStations = window.stationsData.filter(station => {
+            const searchMatch = (station.name.toLowerCase().includes(searchInput) || station.address.toLowerCase().includes(searchInput) || station.city.toLowerCase().includes(searchInput) || station.operator.toLowerCase().includes(searchInput));
+            const hasMatchingConnector = !connectorFilter || station.ports.some(p=>p.type===connectorFilter);
+            const cityMatch = !cityFilter || station.city === cityFilter;
+            return searchMatch && cityMatch && hasMatchingConnector;
+        });
+        renderStationList(window.currentStations);
+        renderMapMarkers(window.currentStations);
+    }
+
+    function clearFilters() { document.getElementById('searchInput').value=''; document.getElementById('cityFilter').value=''; document.getElementById('connectorFilter').value=''; filterStations(); }
+
+    function calculateChargeTime(batteryKWh, chargePowerkW) { if (chargePowerkW===0) return Infinity; const chargeNeededKWh = batteryKWh * 0.6; const timeHours = (chargeNeededKWh / chargePowerkW) * 1.1; if (timeHours>=24) return " > 24 hours (too slow)"; if (timeHours>=1){ const hours=Math.floor(timeHours); const minutes=Math.round((timeHours-hours)*60); return `${hours}h ${minutes}m`; } if (timeHours<0.25) return " < 15 minutes (Ultra Fast!)"; return `${Math.round(timeHours*60)} minutes`; }
+
+    const evModels = {
+        "Nexon EV":       { battery: 40, compatible: ['CCS2','Type 2'], maxDcPower: 50,  maxAcPower: 7.2 },
+        "MG ZS EV":       { battery: 50, compatible: ['CCS2','Type 2'], maxDcPower: 80,  maxAcPower: 7.4 },
+        "Hyundai Kona":   { battery: ['CCS2'],          maxDcPower: 50,  maxAcPower: 7.2 },
+        "Tata Punch EV":  { battery: 35, compatible: ['CCS2','Type 2'], maxDcPower: 30,  maxAcPower: 7.2 },
+        "Tata Tiago EV":  { battery: 24, compatible: ['Type 2'],        maxDcPower: 25,  maxAcPower: 7.2 },
+        "Kia EV6":        { battery: 77, compatible: ['CCS2'],          maxDcPower: 240, maxAcPower: 11 },
+        "BYD Atto 3":     { battery: 60, compatible: ['CCS2','Type 2'], maxDcPower: 80,  maxAcPower: 7.4 },
+        "Mahindra XUV400":{ battery: 39, compatible: ['CCS2','Type 2'], maxDcPower: 50,  maxAcPower: 7.2 }
+    };
+
+    function updateSmartSuggest() {
+        const modelName = document.getElementById('evModelSelect').value;
+        const output = document.getElementById('suggestionOutput');
+        if (modelName === 'none') { output.innerHTML = '<p class="text-gray-400 text-sm">Select an EV model to see compatible ports...</p>'; return; }
+        const model = evModels[modelName];
+        let summaryHtml = `<div class="bg-gray-700 p-4 rounded-xl mb-6 shadow-xl border-t-4 border-emerald-500"><h3 class="text-xl font-bold text-white mb-3">Model Profile: ${modelName}</h3><p class="text-sm text-gray-300 mb-2">Battery Capacity: <span class="font-semibold text-emerald-400">${model.battery} kWh</span></p><p class="text-sm text-gray-300 mb-2">Compatible Connectors: <span class="font-semibold">${model.compatible.join(', ')}</span></p><p class="text-sm text-gray-300">Max DC Input: <span class="font-semibold">${model.maxDcPower} kW</span> | Max AC Input: <span class="font-semibold">${model.maxAcPower} kW</span></p></div><h3 class="text-lg font-bold text-white mb-3">Recommended Stations:</h3>`;
+        const compatibleStations = window.stationsData.filter(station => station.ports.some(port => model.compatible.includes(port.type))).sort((a,b)=>b.rating-a.rating);
+        if (compatibleStations.length===0) summaryHtml += '<p class="text-yellow-400 text-sm">No compatible stations found in the current network.</p>'; else {
+            compatibleStations.forEach(station=>{
+                let compatiblePortsHtml='';
+                station.ports.forEach(port=>{ if (model.compatible.includes(port.type)) {
+                    const power = parseFloat(port.power.replace('kW',''));
+                    const effectivePower = Math.min(power, port.type.includes('DC') ? model.maxDcPower : model.maxAcPower);
+                    const chargeTime = calculateChargeTime(model.battery, effectivePower);
+                    const unitCostMatch = station.cost.match(/₹(\d+)\/unit/);
+                    const unitCost = unitCostMatch ? parseFloat(unitCostMatch[1]) : 20;
+                    const estimatedCost = (model.battery*0.6)*unitCost;
+                    compatiblePortsHtml += `<div class="p-3 bg-gray-600 rounded-lg mb-2 flex items-center justify-between"><div><span class="font-semibold">${port.type} (${port.power})</span> <span class="text-xs font-medium px-2 py-0.5 rounded-full ${getStatusClasses(port.status)} text-white">${port.status}</span></div><div class="text-right"><p class="text-xs text-gray-300">Time (20%->80%): <span class="font-bold text-emerald-400">${chargeTime}</span></p><p class="text-xs text-gray-300">Est. Cost: <span class="font-bold">₹${estimatedCost.toFixed(0)}</span></p></div></div>`;
+                }});
+                summaryHtml += `<div class="bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700 mb-4"><h4 class="text-lg font-bold text-white">${station.name} - ${station.city}</h4><p class="text-xs text-gray-400 mb-3">${station.address}</p>${compatiblePortsHtml}</div>`;
+            });
+        }
+        output.innerHTML = summaryHtml;
+    }
+
+    // Minimal LLM functions removed for brevity (unchanged from original), keep API_KEY empty
+    const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=';
+    const apiKey = "";
+    const SYSTEM_PROMPT = "You are an expert on EV infrastructure in India.";
+
+    async function submitInfoQuery(){
+        const inputEl = document.getElementById('infoInput');
+        const outputEl = document.getElementById('infoOutput');
+        const btn = document.getElementById('infoSubmit');
+        const spinner = document.getElementById('loadingSpinner');
+        const submitText = document.getElementById('submitText');
+
+        const query = (inputEl.value || '').trim();
+        if (!query) {
+            outputEl.innerHTML = '<p class="text-yellow-300 text-sm">Please type a question about EV charging, stations, cost, or connectors.</p>';
+            return;
+        }
+
+        // Show loading
+        btn.disabled = true;
+        spinner.classList.remove('hidden');
+        submitText.textContent = 'Thinking...';
+
+        // Append user question
+        const previous = outputEl.innerHTML.trim();
+        const userBubble = `<div class="mb-2 text-right">
+                                <div class="inline-block bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs max-w-full">
+                                    ${query.replace(/</g,'&lt;')}
+                                </div>
+                            </div>`;
+        outputEl.innerHTML = (previous ? previous : '') + userBubble;
+
+        // Generate local, rule-based answer (no external API needed)
+        const answer = generateLocalEvAnswer(query);
+
+        // Simulate small delay for nicer UX
+        await new Promise(res => setTimeout(res, 500));
+
+        const botBubble = `<div class="mb-2 text-left">
+                                <div class="inline-block bg-gray-800 text-gray-100 px-3 py-2 rounded-xl text-xs max-w-full border border-gray-700">
+                                    ${answer}
+                                </div>
+                           </div>`;
+        outputEl.innerHTML += botBubble;
+        outputEl.scrollTop = outputEl.scrollHeight;
+
+        // Reset UI
+        btn.disabled = false;
+        spinner.classList.add('hidden');
+        submitText.textContent = 'Search';
+        inputEl.value = '';
+    }
+
+    function generateLocalEvAnswer(query){
+        const q = query.toLowerCase();
+
+        // About connectors
+        if (q.includes('ccs2') || q.includes('ccs 2')) {
+            return 'CCS2 is the most common DC fast-charging standard for modern EVs in India. It supports high power (often 30–150 kW or more), ideal when you want to charge from ~20% to 80% in under an hour at compatible fast chargers.';
+        }
+        if (q.includes('type 2') || q.includes('ac charger') || q.includes('slow charge')) {
+            return 'Type 2 is an AC connector typically used for home or workplace charging. Power is lower (usually 3.3–11 kW), so a 0–100% charge can take several hours, but it is gentler on the battery and convenient for overnight charging.';
+        }
+        if (q.includes('chademo')) {
+            return 'CHAdeMO is an older DC fast-charging standard. A few stations still support it, but CCS2 is more common in India now. If your EV supports CHAdeMO, always check the station details for compatibility before planning a trip.';
+        }
+
+        // Cost & billing
+        if (q.includes('cost') || q.includes('price') || q.includes('bill') || q.includes('tariff')) {
+            return 'Public EV charging in India is usually billed per kWh (unit). For example, if a station shows ₹18/unit and your car needs 20 kWh to go from ~20% to 80%, your session will cost about 20 × 18 = ₹360. Some fast chargers also add a small idle or parking fee if you keep the car plugged in after it is full.';
+        }
+
+        // Fast vs slow
+        if (q.includes('fast') || q.includes('slow') || q.includes('difference between ac and dc')) {
+            return 'AC charging (Type 2) is slower and ideal for home/office—good for overnight top-ups. DC fast-charging (CCS2/CHAdeMO) directly feeds high-voltage DC to the battery, letting you charge quickly on highways. Use DC for trips and AC regularly for day-to-day charging to keep the battery healthier.';
+        }
+
+        // Battery health
+        if (q.includes('battery') || q.includes('health') || q.includes('life') || q.includes('degrade')) {
+            return 'To keep your EV battery healthy: avoid staying at 100% for long durations, prefer charging between ~20% and 80% for daily use, do not fast-charge all the time, avoid deep discharges to 0%, and try not to park the car in extreme heat for long periods when at very high or very low state of charge.';
+        }
+
+        // Range & planning
+        if (q.includes('range') || q.includes('trip') || q.includes('planning')) {
+            return 'For trip planning, always consider: (1) your realistic range (usually 70–80% of the brochure value), (2) where fast chargers are located along your route, and (3) charging time. A good thumb rule is to plan a stop when you are expected to reach ~20–25% SoC, not when you are almost at 0%.';
+        }
+
+        // Model-specific hints
+        if (q.includes('nexon')) {
+            return 'Nexon EV typically supports CCS2 DC fast-charging and Type 2 AC. On DC, you can expect ~30–50 kW depending on the charger and conditions, which means a 20–80% top-up in roughly 45–60 minutes.';
+        }
+        if (q.includes('tiago')) {
+            return 'Tiago EV is mainly designed for city usage with AC charging. It can still use public Type 2 chargers effectively—ideal to top-up while parked at malls, offices, or home overnight.';
+        }
+        if (q.includes('ev6') || q.includes('800v')) {
+            return 'Kia EV6 supports very high-power DC charging on compatible ultra-fast chargers thanks to its 800V architecture. On suitable chargers it can add a large chunk of range in under 20–30 minutes.';
+        }
+
+        // Generic default response
+        return 'That is a good question! In simple terms: \n\n• Check which connector your EV supports (CCS2, Type 2, etc.).\n• Use DC fast-chargers (CCS2/CHAdeMO) on highways for quick top-ups.\n• Use Type 2 AC at home/office for regular, battery-friendly charging.\n• Always verify connector type, power rating, and cost in the station details before you start charging.';
+    }
+
+
+    document.getElementById('infoInput').addEventListener('keypress', function(e){ if (e.key === 'Enter') submitInfoQuery(); });
+
+    window.onload = function() {
+        initMap();
+        // Load any stored reviews and apply ratings
+        if (typeof recomputeStationRatingsFromLocal === 'function') {
+            recomputeStationRatingsFromLocal();
+        }
+        const evSelect = document.getElementById('evModelSelect');
+        Object.keys(evModels).forEach(model=>{ const option = document.createElement('option'); option.value=model; option.textContent=model; evSelect.appendChild(option); });
+        showPage('finder');
+
+        // --- START THE REALTIME LISTENER ---
+        if (typeof window.listenForPortStatus === 'function') {
+            window.listenForPortStatus();
+        }
+    };
+</script>
+
+<!-- Booking Modal -->
+<div id="bookingModal" class="fixed inset-0 bg-black bg-opacity-60 hidden items-center justify-center" style="z-index: 9999;">
+    <div class="bg-gray-800 rounded-2xl shadow-2xl p-6 w-11/12 max-w-md border border-gray-700">
+        <h3 class="text-xl font-bold text-emerald-400 mb-2 flex items-center">
+            <i class="fas fa-ticket-alt mr-2"></i> Book Charging Slot
+        </h3>
+        <p class="text-sm text-gray-300 mb-4">
+            Station: <span id="bookingStationName" class="font-semibold text-white"></span><br>
+            Port: <span id="bookingPortInfo" class="font-semibold text-gray-200"></span>
+        </p>
+        <div class="space-y-3 mb-4">
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Mobile Number</label>
+                <input id="bookingPhone" type="tel" class="w-full p-2 rounded-lg bg-gray-900 border border-gray-700 focus:ring-emerald-400 focus:border-emerald-400 text-sm text-gray-100" placeholder="Enter your mobile number">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">Vehicle Number Plate</label>
+                <input id="bookingPlate" type="text" class="w-full p-2 rounded-lg bg-gray-900 border border-gray-700 focus:ring-emerald-400 focus:border-emerald-400 text-sm text-gray-100" placeholder="e.g. DL 01 AB 1234">
+            </div>
+            <div class="text-xs text-gray-300 bg-gray-900 border border-gray-700 rounded-lg p-2">
+                <span id="bookingOtpDisplay">OTP will appear here after you generate it.</span>
+            </div>
+            <p id="bookingError" class="text-xs text-red-400 min-h-[1rem]"></p>
+        </div>
+        <div class="flex justify-end space-x-3">
+            <button onclick="closeBookingModal()" class="px-3 py-2 text-xs rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 font-semibold">
+                Cancel
+            </button>
+            <button id="bookingActionBtn" onclick="handleBookingAction()" class="px-4 py-2 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold">
+                Generate OTP
+            </button>
+        </div>
+        <p class="mt-3 text-[10px] text-gray-400">
+            Note: Booking is held for 5 minutes only. Same phone + vehicle can book only once.
+        </p>
+    </div>
+</div>
+
+</body>
+</html>
